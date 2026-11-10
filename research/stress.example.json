@@ -1,0 +1,19 @@
+{
+  "schema": 1,
+  "seeds": [1, 2, 3, 4, 5],
+  "scenarios": [
+    {"base": "noise"},
+    {"base": "informed"},
+    {"base": "shock"},
+    {"base": "thin"},
+    {"base": "latency"},
+    {"base": "stale_feed"},
+    {"base": "disconnect"},
+    {"base": "latency", "name": "latency_20", "order_latency": 20}
+  ],
+  "strategies": [
+    {"base": "reference"},
+    {"base": "conservative"},
+    {"name": "slower_requote", "requote_every": 5, "params": {"size": 10, "limit": 150}}
+  ]
+}

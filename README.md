@@ -17,13 +17,18 @@ Traders buy and sell yes/no contracts on things public data settles: tomorrow's 
   - It trades only through the public API.
   - It quotes around fair values from models backtested on history they were not fitted on ([docs/notes/catalog-models.md](docs/notes/catalog-models.md)).
   - It does not quote at all where no defensible model exists.
+  - Durable order intents, post-only quotes, account-scoped cancellation leases and exposure
+    limits protect unattended quoting. Use a dedicated account and persistent state file.
+- **Research workbench.** Reproducible stress experiments, paired strategy comparisons,
+  chronological weather evaluation, offline replay and a local bot decision monitor.
+  [Start here, including Windows instructions](docs/research-workbench.md).
 - **Market surveillance.** Detects wash trading, spoofing, marking the close, and insider-like trading. Precision and recall are measured on simulated manipulation.
 
 The full standard is [docs/SPEC.md](docs/SPEC.md). The exact engine behavior is in [docs/protocol.md](docs/protocol.md). Design decisions are in [docs/adr/](docs/adr/).
 
 ## Play money, by design
 
-Credits are granted once at signup. They cannot be bought, sold, withdrawn, redeemed, or transferred, and they have no cash value. Real-money event contracts for US persons require a CFTC-designated contract market, which this project is not. The code contains no deposit, withdrawal, or payment path, and a test will enforce that from G2 onward.
+Credits are granted at signup and through the daily allowance. They cannot be bought, sold, withdrawn, redeemed, or transferred, and they have no cash value. Real-money event contracts for US persons require a CFTC-designated contract market, which this project is not. The code contains no deposit, withdrawal, or payment path, and a test will enforce that from G2 onward.
 
 ## Status
 
