@@ -3,7 +3,7 @@
 // the channel's sequence number) and `trades:<id>`. Same rules as the Python reference client:
 // a delta that skips a sequence number means the book is incomplete, so resubscribe and wait
 // for a fresh snapshot; never apply a gap.
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 
 
 export type Level = [price: number, qty: number];
@@ -34,63 +34,97 @@ export function applyBook(book: Book & { seq: number | null }, m: BookMessage): 
   return { ...book, seq: m.seq, state: m.state, synced: true };
 }
 
+type TrackedBook = Book & { seq: number | null; market: number };
+function empty(market: number): TrackedBook {
+  return { market, synced: false, state: "", bids: new Map(), asks: new Map(), gaps: 0, seq: null };
+}
+
 export function useMarketData(market: number, wsUrl: string): { book: Book; trades: LiveTrade[]; connected: boolean } {
-  const [book, setBook] = useState<Book & { seq: number | null }>({ synced: false, state: "", bids: new Map(), asks: new Map(), gaps: 0, seq: null });
-  const [trades, setTrades] = useState<LiveTrade[]>([]);
-  const [connected, setConnected] = useState(false);
-  // The latest book, for the socket handlers (which update it before rendering it).
-  const ref = useRef(book);
+  const [book, setBook] = useState<TrackedBook>(() => empty(market));
+  const [tape, setTape] = useState<{ market: number; trades: LiveTrade[] }>({ market, trades: [] });
+  const [connection, setConnection] = useState<{ market: number; connected: boolean }>({ market, connected: false });
 
   useEffect(() => {
     let socket: WebSocket | null = null;
     let closed = false;
     let retry = 500;
+    let timer: ReturnType<typeof setTimeout> | null = null;
     const channel = `book:${market}`;
-    const send = (op: string, ch: string) => socket?.send(JSON.stringify({ op, channel: ch }));
+    const tradeChannel = `trades:${market}`;
     const connect = () => {
-      socket = new WebSocket(wsUrl);
-      socket.onopen = () => {
+      if (closed) return;
+      const ws = new WebSocket(wsUrl);
+      socket = ws;
+      let current = empty(market);
+      let trades: LiveTrade[] = [];
+      let tradeSeq: number | null = null;
+      const active = () => !closed && socket === ws;
+      const send = (op: string, ch: string) => ws.send(JSON.stringify({ op, channel: ch }));
+      ws.onopen = () => {
+        if (!active()) return;
         retry = 500;
-        setConnected(true);
+        setConnection({ market, connected: true });
+        setBook(current);
+        setTape({ market, trades });
         send("subscribe", channel);
-        send("subscribe", `trades:${market}`);
+        send("subscribe", tradeChannel);
       };
-      socket.onmessage = (event) => {
-        const m = JSON.parse(String(event.data)) as { type: string; channel?: string } & Record<string, unknown>;
+      ws.onmessage = (event) => {
+        if (!active()) return;
+        let m: { type: string; channel?: string } & Record<string, unknown>;
+        try { m = JSON.parse(String(event.data)) as typeof m; }
+        catch { ws.close(); return; }
         if (m.channel === channel && (m.type === "snapshot" || m.type === "delta")) {
-          const next = applyBook(ref.current, m as unknown as BookMessage);
+          const next = applyBook(current, m as unknown as BookMessage);
           if (next === "resubscribe") {
-            const stale = { ...ref.current, synced: false, seq: null, gaps: ref.current.gaps + 1 };
-            ref.current = stale;
-            setBook(stale);
+            current = { ...empty(market), gaps: current.gaps + 1 };
+            setBook(current);
             send("unsubscribe", channel);
             send("subscribe", channel);
           } else if (next !== "ignored") {
-            ref.current = next;
-            setBook(next);
+            current = { ...next, market };
+            setBook(current);
           }
-        } else if (m.type === "trade") {
+        } else if (m.channel === tradeChannel && (m.type === "subscribed" || m.type === "resync")) {
+          tradeSeq = Number(m.seq);
+          trades = [];
+          setTape({ market, trades });
+        } else if (m.channel === tradeChannel && m.type === "trade") {
           const t = m as unknown as LiveTrade;
-          setTrades((old) => [t, ...old].slice(0, 200));
+          if (tradeSeq !== null && t.seq <= tradeSeq) return;
+          if (tradeSeq !== null && t.seq !== tradeSeq + 1) {
+            trades = [];
+            tradeSeq = null;
+            setTape({ market, trades });
+            send("unsubscribe", tradeChannel);
+            send("subscribe", tradeChannel);
+            return;
+          }
+          tradeSeq = t.seq;
+          trades = [t, ...trades].slice(0, 200);
+          setTape({ market, trades });
         }
       };
-      socket.onclose = () => {
-        setConnected(false);
-        if (!closed) {
-          setTimeout(connect, retry);
-          retry = Math.min(retry * 2, 10_000);
-        }
-        const reset = { ...ref.current, synced: false, seq: null };
-        ref.current = reset;
-        setBook(reset);
+      ws.onclose = () => {
+        if (!active()) return;
+        setConnection({ market, connected: false });
+        current = empty(market);
+        setBook(current);
+        setTape({ market, trades: [] });
+        timer = setTimeout(connect, retry);
+        retry = Math.min(retry * 2, 10_000);
       };
     };
     connect();
     return () => {
       closed = true;
+      if (timer !== null) clearTimeout(timer);
       socket?.close();
     };
   }, [market, wsUrl]);
 
-  return { book, trades, connected };
+  // Render can precede effect cleanup. Never expose another market's snapshot in that window.
+  const owned = book.market === market ? book : empty(market);
+  return { book: owned, trades: tape.market === market ? tape.trades : [],
+    connected: connection.market === market && connection.connected && owned.synced };
 }
