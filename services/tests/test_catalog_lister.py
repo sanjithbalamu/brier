@@ -46,9 +46,17 @@ class FakeGateway:
 
     def request(self, method: str, path: str, body: dict[str, Any] | None = None) -> Any:  # noqa: ANN401 - JSON
         if method == "GET":
+            if path.endswith("/rules"):
+                market = int(path.split("/")[-2])
+                return {"rulebook": next(r for r in self.listed if r["market"] == market)}
             slug = path.removeprefix("/v1/events/")
             if slug in self.existing:
-                return {"slug": slug}
+                rules = [r for r in self.listed if r["event"]["slug"] == slug]
+                if not rules and slug.startswith("nyc-high-"):
+                    rules = templates.temperature(
+                        templates.CITIES[0], dt.date.fromisoformat(slug[-10:]), 60
+                    )
+                return {"slug": slug, "markets": [{"market": r["market"]} for r in rules]}
             raise ApiError(404, {"error": {"code": "not_found"}})
         assert body is not None
         rb = body["rulebook"]
@@ -90,3 +98,20 @@ def test_a_refused_listing_is_reported_and_the_rest_continue() -> None:
     assert "geomagnetic-storm-2026-11-09" not in listed
     assert "geomagnetic-storm-2026-11-10" in listed
     assert logs.count("list_failed") == 1
+
+
+def test_partial_event_resumes_with_original_boundaries_after_forecast_changes() -> None:
+    day = dt.date(2026, 11, 9)
+    city = templates.CITIES[0]
+    original = templates.temperature(city, day, 60)
+    gw = FakeGateway(set(), frozenset({original[1]["market"]}))
+    now = dt.datetime(2026, 11, 8, tzinfo=dt.UTC)
+    run_once(gw, now, lambda c, d: 60, lambda *a, **k: None)
+    assert [r for r in gw.listed if r["event"]["slug"] == original[0]["event"]["slug"]] == original[
+        :1
+    ]
+    gw.refuse = frozenset()
+    run_once(gw, now, lambda c, d: 75, lambda *a, **k: None)
+    completed = [r for r in gw.listed if r["event"]["slug"] == original[0]["event"]["slug"]]
+    assert completed == original
+    assert run_once(gw, now, lambda c, d: 80, lambda *a, **k: None) == []
