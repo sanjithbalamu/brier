@@ -48,7 +48,7 @@ function Ticket({ o, side, setSide, book, signedIn, question }: { o: Outcome; si
   const { bid, ask } = best(book, o);
   const yes = ask;
   const no = bid == null ? null : 100 - bid;
-  const open = o.state === "open";
+  const open = (book.synced ? book.state : o.state) === "open";
   const held = side === "yes" ? Math.max(0, o.position) : Math.max(0, -o.position);
   const plan = useMemo(() => {
     if (!book.synced) return null;
@@ -58,7 +58,7 @@ function Ticket({ o, side, setSide, book, signedIn, question }: { o: Outcome; si
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
-    if (!plan) return;
+    if (!plan || !open || busy) return;
     setBusy(true);
     setMessage(null);
     try {
@@ -107,13 +107,15 @@ function Ticket({ o, side, setSide, book, signedIn, question }: { o: Outcome; si
       </div>
       {mode === "limit" ? (
         <TradePanel
-          key={`${o.market}-${side}`}
+          key={`${o.market}-${side}-${action}`}
           market={o.market}
           quotes={{ buyYes: yes, buyNo: no, sellYes: bid, sellNo: ask == null ? null : 100 - ask }}
           signedIn={signedIn}
           canTrade={open}
           position={o.position}
           initialSide={side}
+          dataReady={book.synced}
+          selection={{ action, side, onChange: (a, s) => { setAction(a); setSide(s); } }}
         />
       ) : (
         <form onSubmit={submit} className="stack" style={{ gap: 14 }}>

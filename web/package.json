@@ -12,7 +12,8 @@
     "start": "next start --port 3005",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
-    "e2e": "playwright test"
+    "e2e": "playwright test",
+    "test:research": "playwright test --config playwright.research.config.ts"
   },
   "dependencies": {
     "next": "16.4.3",

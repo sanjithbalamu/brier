@@ -23,7 +23,7 @@ function Line({ n, now }: { n: Notification; now: number }) {
     const won = (held > 0 && n.result === "yes") || (held < 0 && n.result === "no");
     text =
       n.result === "void" ? (
-        <>Voided: your cost was returned</>
+        <>Voided: each held contract paid 0.50 credit</>
       ) : held === 0 ? (
         <>Settled {n.result === "yes" ? "Yes" : "No"}</>
       ) : (

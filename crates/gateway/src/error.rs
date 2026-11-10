@@ -28,6 +28,7 @@ pub const GATEWAY_CODES: &[&str] = &[
     "conflict",
     "too_early",
     "totp_required",
+    "lease_expired",
 ];
 
 /// An error answered to a client.

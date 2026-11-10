@@ -27,6 +27,8 @@ export function TradePanel({
   canTrade,
   position,
   initialSide,
+  selection,
+  dataReady = true,
 }: {
   market: number;
   quotes: Quotes;
@@ -34,12 +36,16 @@ export function TradePanel({
   canTrade: boolean;
   position: number;
   initialSide: "yes" | "no";
+  selection?: { action: "buy" | "sell"; side: "yes" | "no"; onChange: (action: "buy" | "sell", side: "yes" | "no") => void };
+  dataReady?: boolean;
 }) {
   const router = useRouter();
-  const [action, setAction] = useState<"buy" | "sell">("buy");
-  const [side, setSide] = useState<"yes" | "no">(initialSide);
+  const [localAction, setAction] = useState<"buy" | "sell">("buy");
+  const [localSide, setSide] = useState<"yes" | "no">(initialSide);
+  const action = selection?.action ?? localAction;
+  const side = selection?.side ?? localSide;
   const quote = (a: "buy" | "sell", s: "yes" | "no") => quotes[`${a}${s === "yes" ? "Yes" : "No"}` as keyof Quotes];
-  const [price, setPrice] = useState<number>(quote("buy", initialSide) ?? 50);
+  const [price, setPrice] = useState<number>(quote(action, side) ?? 50);
   const [qty, setQty] = useState(10);
   const [tif, setTif] = useState<"gtc" | "ioc">("gtc");
   const [busy, setBusy] = useState(false);
@@ -48,14 +54,17 @@ export function TradePanel({
   const choose = (a: "buy" | "sell", s: "yes" | "no") => {
     setAction(a);
     setSide(s);
+    selection?.onChange(a, s);
     setPrice(quote(a, s) ?? 50);
     setMessage(null);
   };
-  const valid = Number.isInteger(price) && price >= 1 && price <= 99 && Number.isInteger(qty) && qty >= 1 && qty <= 25_000;
+  const held = side === "yes" ? Math.max(0, position) : Math.max(0, -position);
+  const valid = Number.isInteger(price) && price >= 1 && price <= 99 && Number.isInteger(qty) && qty >= 1 && qty <= 25_000 && (action === "buy" || qty <= held);
   const word = side === "yes" ? "Yes" : "No";
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
+    if (!valid || !canTrade || !dataReady || busy) return;
     setBusy(true);
     setMessage(null);
     const bookSide = (action === "buy") === (side === "yes") ? "buy" : "sell";
@@ -83,13 +92,13 @@ export function TradePanel({
 
   return (
     <form className="card panel" onSubmit={submit} aria-label="Trade">
-      <div className="tabs" role="tablist" aria-label="Buy or sell">
+      {!selection && <div className="tabs" role="tablist" aria-label="Buy or sell">
         {(["buy", "sell"] as const).map((a) => (
           <button key={a} type="button" role="tab" aria-selected={action === a} onClick={() => choose(a, side)}>
             {a}
           </button>
         ))}
-      </div>
+      </div>}
       <div className="seg" role="group" aria-label="Outcome">
         <button type="button" className="px yes" aria-pressed={side === "yes"} onClick={() => choose(action, "yes")}>
           Yes {quote(action, "yes") ?? "—"}
@@ -101,9 +110,9 @@ export function TradePanel({
         </button>
       </div>
       <label className="field">
-        <span>Contracts</span>
+        <span>Contracts{action === "sell" && <span className="muted"> (you hold {held})</span>}</span>
         <div className="input-adorn">
-          <input type="number" inputMode="numeric" min={1} max={25000} value={qty} onChange={(e) => setQty(Number(e.target.value))} />
+          <input type="number" inputMode="numeric" min={1} max={action === "sell" ? held : 25000} value={qty} onChange={(e) => setQty(Number(e.target.value))} />
           <span className="unit" aria-hidden="true">contracts</span>
         </div>
       </label>
@@ -154,8 +163,8 @@ export function TradePanel({
           Log in to trade
         </Link>
       ) : (
-        <button className="btn primary block" type="submit" disabled={busy || !canTrade || !valid}>
-          {!canTrade ? "Trading is closed" : busy ? "Placing…" : `${action === "buy" ? "Buy" : "Sell"} ${qty.toLocaleString("en-US")} ${word} at ${price}¢`}
+        <button className="btn primary block" type="submit" disabled={busy || !canTrade || !dataReady || !valid}>
+          {!canTrade ? "Trading is closed" : !dataReady ? "Waiting for live prices…" : busy ? "Placing…" : `${action === "buy" ? "Buy" : "Sell"} ${qty.toLocaleString("en-US")} ${word} at ${price}¢`}
         </button>
       )}
       {position !== 0 && (

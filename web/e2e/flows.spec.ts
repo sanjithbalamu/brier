@@ -203,10 +203,53 @@ test("an event: browse its category, open it, and buy one outcome by amount", as
   await expect(page.getByText("Bought 10 Yes on “59-60°F”.")).toBeVisible();
   await page.goto("/portfolio");
   await expect(page.getByRole("row", { name: /New York high 59-60°F on Nov 12.*10 Yes/ })).toBeVisible();
+  // Switching order type keeps the chosen action, with one authoritative set of controls.
+  await page.goto(`/e/${event.slug}`);
+  await page.getByRole("button", { name: /^59-60°F/ }).click();
+  await expect(page.getByText("Live", { exact: true })).toBeVisible();
+  await page.getByRole("tab", { name: "sell", exact: true }).click();
+  await page.getByLabel("Order type").selectOption("limit");
+  await expect(page.getByRole("tablist", { name: "Buy or sell" })).toHaveCount(1);
+  await expect(page.getByRole("tab", { name: "sell", exact: true })).toHaveAttribute("aria-selected", "true");
+  await expect(page.getByRole("button", { name: /^Sell 10 Yes at/ })).toBeEnabled();
+  await page.getByRole("spinbutton", { name: /^Contracts/ }).fill("11");
+  await expect(page.getByRole("button", { name: /^Sell 11 Yes at/ })).toBeDisabled();
+  await accessible(page, "sell limit ticket");
   for (const [path, what] of [["/movers", "movers"], ["/new", "new markets"], ["/search?q=new+york", "search"], ["/watchlist", "watchlist"]] as const) {
     await page.goto(path);
     await accessible(page, what);
   }
+});
+
+test("market switching accepts a fresh lower sequence and ignores the old socket's close", async ({ page }) => {
+  const first = state().event.markets[0]!;
+  const second = state().event.markets[1]!;
+  await page.addInitScript(() => {
+    class Socket {
+      onopen: (() => void) | null = null;
+      onclose: (() => void) | null = null;
+      onmessage: ((event: { data: string }) => void) | null = null;
+      constructor() { sockets.push(this); setTimeout(() => this.onopen?.(), 0); }
+      send() {}
+      close() {} // Deliberately deliver the old close after the new snapshot.
+      message(value: unknown) { this.onmessage?.({ data: JSON.stringify(value) }); }
+    }
+    const sockets: Socket[] = [];
+    Object.assign(window, { WebSocket: Socket, testSockets: sockets });
+  });
+  await page.goto(`/e/${state().event.slug}`);
+  await page.getByRole("button", { name: new RegExp(`^${first.outcome.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`) }).click();
+  await page.waitForFunction("window.testSockets.length >= 1");
+  await page.evaluate(`window.testSockets.at(-1).message({type:'snapshot',channel:'book:${first.market}',seq:100,state:'open',bids:[[60,100]],asks:[[70,100]]})`);
+  await expect(page.locator(".ticket .px.yes")).toHaveText("Yes 70¢");
+  await page.evaluate("window.previousSocket = window.testSockets.at(-1)");
+  await page.getByRole("button", { name: new RegExp(`^${second.outcome.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`) }).click();
+  await page.waitForFunction("window.testSockets.at(-1) !== window.previousSocket");
+  await page.evaluate(`window.testSockets.at(-1).message({type:'snapshot',channel:'book:${second.market}',seq:1,state:'open',bids:[[20,100]],asks:[[30,100]]})`);
+  await expect(page.locator(".ticket .px.yes")).toHaveText("Yes 30¢");
+  await page.evaluate("window.previousSocket.onclose()");
+  await expect(page.getByText("Live", { exact: true })).toBeVisible();
+  await expect(page.locator(".ticket .px.yes")).toHaveText("Yes 30¢");
 });
 
 test("a forecast is recorded, and covered by the next price samples", async ({ browser }) => {

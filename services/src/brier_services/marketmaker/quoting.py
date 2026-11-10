@@ -28,6 +28,12 @@ class Params:
     base: float = 0.015
     vol: float = 0.02
 
+    def __post_init__(self) -> None:
+        if not 1 <= self.size <= 25_000 or self.limit < 1:
+            raise ValueError("size must be 1..25000 and inventory limit positive")
+        if any(not math.isfinite(x) or x < 0 for x in (self.skew, self.floor, self.base, self.vol)):
+            raise ValueError("quoting parameters must be finite and non-negative")
+
 
 @dataclass(frozen=True)
 class Quote:

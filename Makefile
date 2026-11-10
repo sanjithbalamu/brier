@@ -9,6 +9,25 @@ PIP_AUDIT_VERSION := 2.10.1
 .PHONY: help setup env up down db-url check rust-check py-check private-check test-all audit differential-full bench crash gateway-bench dependency-age fuzz-campaign resolution-study
 
 SEED ?= 1
+RUN ?=
+METRICS ?= var/marketmaker/metrics.jsonl
+
+.PHONY: research research-check research-report bot-monitor
+
+research: ## Run paired stress experiments and create an offline dashboard (no gateway required)
+	$(UV_RUN) python -m brier_services.research run --config research/stress.example.json
+
+research-check: ## Verify and replay a saved experiment: make research-check RUN=var/research/<id>
+	@test -n "$(RUN)" || { echo 'Set RUN to an experiment directory'; exit 1; }
+	$(UV_RUN) python -m brier_services.research verify "$(RUN)"
+	$(UV_RUN) python -m brier_services.research replay "$(RUN)"
+
+research-report: ## Rebuild an offline dashboard: make research-report RUN=var/research/<id>
+	@test -n "$(RUN)" || { echo 'Set RUN to an experiment directory'; exit 1; }
+	$(UV_RUN) python -m brier_services.research report "$(RUN)" --out "$(RUN).html"
+
+bot-monitor: ## Read-only bot decision dashboard at localhost:3010; override METRICS if needed
+	$(UV_RUN) python -m brier_services.research monitor --metrics "$(METRICS)"
 
 help: ## List every command
 	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*## "} {printf "  %-14s %s\n", $$1, $$2}'

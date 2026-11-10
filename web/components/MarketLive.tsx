@@ -104,7 +104,7 @@ export function MarketLive({
         {below}
       </div>
       <aside className="rail stack" aria-label="Trade and forecast">
-        <TradePanel market={market} quotes={quotes} signedIn={signedIn} canTrade={canTrade} position={position} initialSide={initialSide} />
+        <TradePanel market={market} quotes={quotes} signedIn={signedIn} canTrade={book.synced ? book.state === "open" : canTrade} dataReady={book.synced} position={position} initialSide={initialSide} />
         {rail}
       </aside>
     </div>

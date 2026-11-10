@@ -14,6 +14,7 @@ pub mod error;
 pub mod events;
 pub mod feed;
 pub mod forecasts;
+pub mod leases;
 pub mod limits;
 pub mod markets;
 pub mod resolution;
@@ -79,6 +80,9 @@ pub const CLIENT_ADDRESS_HEADER: &str = "x-brier-client-address";
 pub struct AppState {
     /// The running core.
     pub core: CoreHandle,
+    /// Serializes lease changes/cancellations against order submission. Ordinary orders share
+    /// the read side, retaining concurrency while preventing a place-after-expiry race.
+    pub order_safety: tokio::sync::RwLock<()>,
     /// Identity tables and read models. One connection: tokio-postgres pipelines concurrent
     /// queries over it.
     pub db: Client,
@@ -122,6 +126,7 @@ impl AppState {
             feed: feed::spawn(core.clone()),
             shutdown: watch::channel(false).0,
             core,
+            order_safety: tokio::sync::RwLock::new(()),
             db,
             replays: ReplayCache::default(),
             order_limits: Limiter::per_second(
@@ -297,6 +302,8 @@ endpoints! {
     POST "/v1/notifications/seen" => social::seen,
     GET "/v1/ws" => ws::upgrade,
     POST "/v1/orders" => routes::place,
+    DELETE "/v1/orders" => leases::cancel_mine,
+    POST "/v1/orders/cancel-after" => leases::heartbeat,
     GET "/v1/orders/history" => routes::history,
     GET "/v1/orders/{id}" => routes::order,
     DELETE "/v1/orders/{id}" => routes::cancel,

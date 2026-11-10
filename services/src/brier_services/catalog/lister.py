@@ -58,14 +58,49 @@ def events_for(
     return out
 
 
-def _exists(api: Api, slug: str) -> bool:
+def _existing(api: Api, slug: str) -> dict[str, Any] | None:
     try:
-        api.request("GET", f"/v1/events/{slug}")
+        result = api.request("GET", f"/v1/events/{slug}")
     except ApiError as e:
         if e.status == 404:
-            return False
+            return None
         raise
-    return True
+    return dict(result)
+
+
+def missing_rulebooks(api: Api, event: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Resume a partial event, using its existing temperature boundaries as the anchor."""
+    existing = _existing(api, event[0]["event"]["slug"])
+    if existing is None:
+        return event
+    present = {m["market"] for m in existing["markets"]}
+    expected = {r["market"] for r in event}
+    if present == expected:
+        return []
+    if not present or not present <= expected:
+        raise ValueError("existing event does not match the expected outcome set")
+    pinned = [api.request("GET", f"/v1/markets/{m}/rules")["rulebook"] for m in sorted(present)]
+    anchor = pinned[0]
+    if anchor["source"]["provider"] == "nws":
+        location = anchor["source"]["series"].removeprefix("CLI/")
+        city = next((c for c in templates.CITIES if c.location == location), None)
+        if city is None:
+            raise ValueError("unknown city in partially listed event")
+        candidate = next(r for r in event if r["market"] == anchor["market"])
+        shift = int(anchor["condition"]["threshold"]) - int(candidate["condition"]["threshold"])
+        high = (
+            int(event[0]["condition"]["threshold"])
+            + templates.TEMPERATURE_WIDTH * (templates.TEMPERATURE_INNER // 2)
+            + 2
+            + shift
+        )
+        event = templates.temperature(city, dt.date.fromisoformat(anchor["observation"]), high)
+    by_id = {r["market"]: r for r in event}
+    if any(rule != by_id[rule["market"]] for rule in pinned):
+        raise ValueError(
+            "existing rulebooks differ from the pinned template; manual review required"
+        )
+    return [r for r in event if r["market"] not in present]
 
 
 def run_once(
@@ -79,9 +114,10 @@ def run_once(
         for event in events_for(day, forecast, say):
             slug = event[0]["event"]["slug"]
             try:
-                if _exists(api, slug):
+                missing = missing_rulebooks(api, event)
+                if not missing:
                     continue
-                for rulebook in event:
+                for rulebook in missing:
                     api.request(
                         "POST",
                         "/v1/admin/markets",
@@ -90,8 +126,13 @@ def run_once(
                             "reason": f"series listing: {rulebook['event']['series']}",
                         },
                     )
-            except ApiError as e:
-                say("list_failed", slug=slug, status=e.status, error=str(e))
+            except (ApiError, ValueError) as e:
+                say(
+                    "list_failed",
+                    slug=slug,
+                    status=e.status if isinstance(e, ApiError) else None,
+                    error=str(e),
+                )
                 continue
             listed.append(slug)
             say("listed", slug=slug, markets=len(event))

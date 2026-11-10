@@ -163,6 +163,7 @@ async fn serve(url: &str) -> Result<(), String> {
     };
     let state = Arc::new(state);
     let schedule = tokio::spawn(scheduler::run(Arc::clone(&state)));
+    let leases = tokio::spawn(brier_gateway::leases::run(Arc::clone(&state)));
     let projector = tokio::spawn(run_projector(
         projector_db,
         data,
@@ -190,6 +191,7 @@ async fn serve(url: &str) -> Result<(), String> {
     // The scheduler stops on the same signal; with it and the router gone, every core handle
     // is gone, so the core finishes its last batch and stops.
     schedule.await.map_err(|e| format!("scheduler task: {e}"))?;
+    leases.await.map_err(|e| format!("order lease task: {e}"))?;
     let core_result = tokio::task::spawn_blocking(move || core_thread.join())
         .await
         .map_err(|e| e.to_string())?;
