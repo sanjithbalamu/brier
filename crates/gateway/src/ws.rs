@@ -391,7 +391,7 @@ struct AmendMessage {
 
 /// Start an order command; its reply goes to the outbox once durable.
 fn order(
-    s: &AppState,
+    s: &Arc<AppState>,
     session: &Session,
     out: &mpsc::Sender<Utf8Bytes>,
     op: &str,
@@ -414,15 +414,15 @@ fn order(
                 format!("at most {MAX_IN_FLIGHT} orders awaiting durability per connection"),
             )
         })?;
-    let (core, out) = (s.core.clone(), out.clone());
+    let (state, out) = (Arc::clone(s), out.clone());
     tokio::spawn(async move {
-        let result = match core.submit(command).await {
+        let result = match crate::leases::submit(&state, command).await {
             Ok(c) => match command {
                 Command::Cancel { order, .. } => cancel_result(&c, order),
                 Command::Amend { order, .. } => amend_result(&c, order),
                 _ => place_result(&c),
             },
-            Err(e) => Err(e.into()),
+            Err(e) => Err(e),
         };
         drop(permit);
         let _ = out.send(reply(id.as_ref(), result)).await; // the connection may have closed

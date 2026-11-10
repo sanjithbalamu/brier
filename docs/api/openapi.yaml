@@ -911,6 +911,15 @@ paths:
         '101': { description: Switching protocols }
         '400': { description: Not a WebSocket upgrade request }
   /v1/orders:
+    delete:
+      tags: [trading]
+      summary: Cancel all of the authenticated account's resting orders
+      description: Does not affect other accounts or disarm a cancellation lease.
+      responses:
+        '200': { description: Durable cancellation, with seq and status }
+        '401': { $ref: '#/components/responses/Error' }
+        '403': { $ref: '#/components/responses/Error' }
+        '429': { $ref: '#/components/responses/Error' }
     post:
       tags: [trading]
       summary: Place an order
@@ -927,10 +936,42 @@ paths:
               schema: { $ref: '#/components/schemas/PlaceResult' }
         '400': { $ref: '#/components/responses/Error' }
         '401': { $ref: '#/components/responses/Error' }
+        '409': { $ref: '#/components/responses/Error' } # lease_expired
         '422': { $ref: '#/components/responses/Error' }
         '429': { $ref: '#/components/responses/Error' }
         '503': { $ref: '#/components/responses/Error' }
         '504': { $ref: '#/components/responses/Error' }
+  /v1/orders/cancel-after:
+    post:
+      tags: [trading]
+      summary: Arm or renew an account-wide cancellation deadline
+      description: |
+        Body seconds is 5..300, or 0 to cancel all own orders and disarm. Requires a
+        trading account; accepts session or signed authentication. Renew before expiry.
+        Expired leases block REST and WebSocket placements and amendments with lease_expired (409).
+        Renewing after expiry cancels old orders before rearming. The gateway checks
+        deadlines every 250 ms while healthy; deadlines survive restarts. Database/core
+        outages can delay cancellation, and commands already admitted may execute first.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [seconds]
+              properties:
+                seconds:
+                  oneOf:
+                    - { type: integer, const: 0 }
+                    - { type: integer, minimum: 5, maximum: 300 }
+      responses:
+        '200': { description: Armed boolean and expires_at Unix seconds, or null when disarmed }
+        '400': { $ref: '#/components/responses/Error' }
+        '401': { $ref: '#/components/responses/Error' }
+        '403': { $ref: '#/components/responses/Error' }
+        '429': { $ref: '#/components/responses/Error' }
+        '503': { $ref: '#/components/responses/Error' }
   /v1/orders/history:
     get:
       tags: [history]
@@ -1021,6 +1062,7 @@ paths:
                   remaining: { type: integer }
         '400': { $ref: '#/components/responses/Error' }
         '401': { $ref: '#/components/responses/Error' }
+        '409': { $ref: '#/components/responses/Error' } # lease_expired
         '422': { $ref: '#/components/responses/Error' }
         '429': { $ref: '#/components/responses/Error' }
   /v1/portfolio:
@@ -1611,6 +1653,7 @@ components:
         - conflict
         - too_early
         - totp_required
+        - lease_expired
         - unknown_market
         - market_exists
         - market_not_open

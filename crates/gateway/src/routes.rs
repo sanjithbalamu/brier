@@ -691,7 +691,7 @@ pub(crate) fn amend_result(c: &Committed, order: OrderId) -> Result<Value, ApiEr
 pub async fn place(State(s): Shared, req: Req) -> ApiResult {
     let account = trader(&s, &req).await?;
     let command = decode_order(&req.body, account)?;
-    Ok(Json(place_result(&s.core.submit(command).await?)?).into_response())
+    Ok(Json(place_result(&crate::leases::submit(&s, command).await?)?).into_response())
 }
 
 /// `DELETE /v1/orders/{id}`: cancel a resting order.
@@ -707,14 +707,15 @@ pub async fn amend(State(s): Shared, Path(raw): Path<String>, req: Req) -> ApiRe
     let account = trader(&s, &req).await?;
     let order = OrderId::new(parse_id(&raw, "order")?);
     let AmendBody { qty } = req.json()?;
-    let c = s
-        .core
-        .submit(Command::Amend {
+    let c = crate::leases::submit(
+        &s,
+        Command::Amend {
             account,
             order,
             qty,
-        })
-        .await?;
+        },
+    )
+    .await?;
     Ok(Json(amend_result(&c, order)?).into_response())
 }
 
